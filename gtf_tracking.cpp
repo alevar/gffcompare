@@ -561,6 +561,7 @@ void gatherRefLocOvls(GffObj& m, GLocus& rloc) {
 	for (int i=0;i<rloc.mrnas.Count();i++) {
 		GffObj* r=rloc.mrnas[i];
 		TOvlData ovld=getOvlData(m,*r, stricterMatching, 1, cdsMatching);
+
 		if (ovld.ovlcode!=0) { //has some sort of overlap with r
 			((CTData*)m.uptr)->addOvl(ovld,r);
 			//if (classcode_rank(olen>ovlen) { ovlen=olen; rovl=r; }

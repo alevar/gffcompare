@@ -156,37 +156,61 @@ bool closerRef(GffObj* a, GffObj* b, int numexons, byte rank); //for better CovL
 
 class GLocus;
 
-class COvLink {
+class COvLink
+{
 public:
-    char code;
-    byte rank;
-    int16_t numExons; //number of exons in the query mRNA
-    GffObj* mrna;
-    int ovlen;
-    int16_t numJmatch; //number of matching junctions in this overlap
-    COvLink(char c=0, GffObj* r=NULL, int exonCount=0, int olen=0, int jmatch=0):code(c),
-    		mrna(r), ovlen(olen), numJmatch(jmatch) {
-    	if (exonCount>255) exonCount=255;
-    	numExons=exonCount;
-		rank=classcode_rank(c);
-	}
+  char code;
+  byte rank;
+  int16_t numExons; // number of exons in the query mRNA
+  GffObj *mrna;
+  int ovlen;
+  int16_t numJmatch; // number of matching junctions in this overlap
 
-    bool operator<(COvLink& b) { //lower = higher priority
-		if (rank==b.rank && b.mrna!=NULL && mrna!=NULL) {
-			if (numExons==1 && b.mrna->exons.Count()!=mrna->exons.Count()) {
-				if (mrna->exons.Count()==1) return true; //SET match always has priority
-				else if (b.mrna->exons.Count()==1) return false;
-			}
-			if (numExons>1 && b.numJmatch!=numJmatch) {
-				return (numJmatch > b.numJmatch);
-			}
-			return (ovlen==b.ovlen)? closerRef(mrna, b.mrna, numExons, rank) : (ovlen>b.ovlen);
-		}
-		else return rank<b.rank;
-	}
-    bool operator==(COvLink& b) {
-		return (rank==b.rank && mrna==b.mrna);
-	}
+  char cds_code;
+  byte cds_rank;
+
+  COvLink(char c = 0, GffObj *r = NULL, int exonCount = 0, int olen = 0, int jmatch = 0) : code(c),
+                                                                                           mrna(r), ovlen(olen), numJmatch(jmatch)
+  {
+    if (exonCount > 255)
+      exonCount = 255;
+    numExons = exonCount;
+    rank = classcode_rank(c);
+
+    cds_code = '-';
+    cds_rank = 0;
+  }
+
+  bool operator<(COvLink &b)
+  { // lower = higher priority
+    if (rank == b.rank && b.mrna != NULL && mrna != NULL)
+    {
+      if (numExons == 1 && b.mrna->exons.Count() != mrna->exons.Count())
+      {
+        if (mrna->exons.Count() == 1)
+          return true; // SET match always has priority
+        else if (b.mrna->exons.Count() == 1)
+          return false;
+      }
+      if (numExons > 1 && b.numJmatch != numJmatch)
+      {
+        return (numJmatch > b.numJmatch);
+      }
+      return (ovlen == b.ovlen) ? closerRef(mrna, b.mrna, numExons, rank) : (ovlen > b.ovlen);
+    }
+    else
+      return rank < b.rank;
+  }
+  bool operator==(COvLink &b)
+  {
+    return (rank == b.rank && mrna == b.mrna);
+  }
+
+  void setCdsCode(char c)
+  {
+    this->cds_code = c;
+    this->cds_rank = classcode_rank(c);
+  }
 };
 
 class GISeg: public GSeg {
@@ -238,6 +262,7 @@ public:
 	CEqList* eqlist; //keep track of matching transfrags
 	//int eqdata; // flags for EQ list (is it a list head?)
 	char classcode; //the best/final classcode
+  char cds_classcode; // cds class code of the best/final mrna match
 	// Stringtie specific data:
 	double FPKM;
 	double TPM;
@@ -347,19 +372,33 @@ public:
 		ovls.AddIfNew(new COvLink(code, target, mrna->exons.Count(), ovlen));
 	}
 
-	char getBestCode(GffObj** r=NULL, int* ovlen=NULL) {
-		char best_ovlcode = (ovls.Count()>0) ? ovls[0]->code : 0 ;
-		if (best_ovlcode>0) {
-			if (r!=NULL) *r=ovls[0]->mrna;
-			if (ovlen!=NULL) *ovlen=ovls[0]->ovlen;
-		}
-		else {
-			if (r!=NULL) *r=NULL;
-			if (ovlen!=NULL) *ovlen=0;
-		}
-		return best_ovlcode;
+  COvLink* getOvl(GffObj* target) {
+    for (int i=0;i<ovls.Count();i++) {
+      if (ovls[i]->mrna==target) return ovls[i];
     }
-	bool operator<(CTData& b) { return (mrna < b.mrna); }
+    return NULL;
+  }
+
+  char getBestCode(GffObj **r = NULL, int *ovlen = NULL)
+  {
+    char best_ovlcode = (ovls.Count() > 0) ? ovls[0]->code : 0;
+    if (best_ovlcode > 0)
+    {
+      if (r != NULL)
+        *r = ovls[0]->mrna;
+      if (ovlen != NULL)
+        *ovlen = ovls[0]->ovlen;
+    }
+    else
+    {
+      if (r != NULL)
+        *r = NULL;
+      if (ovlen != NULL)
+        *ovlen = 0;
+    }
+    return best_ovlcode;
+  }
+  bool operator<(CTData& b) { return (mrna < b.mrna); }
 	bool operator==(CTData& b) { return (mrna==b.mrna); }
 };
 

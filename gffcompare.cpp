@@ -511,7 +511,9 @@ int main(int argc, char* argv[]) {
         tfiles[fi]=fopen(s.chars(),"w");
         if (tfiles[fi]==NULL)
           GError("Error creating file '%s'!\n",s.chars());
-        fprintf(tfiles[fi],"ref_gene_id\tref_id\tclass_code\tqry_gene_id\tqry_id\tnum_exons\tFPKM\tTPM\tcov\tlen\tmajor_iso_id\tref_match_len\n");
+        fprintf(tfiles[fi],"ref_gene_id\tref_id\tclass_code\tqry_gene_id\tqry_id\tnum_exons\tFPKM\tTPM\tcov\tlen\tmajor_iso_id\tref_match_len");
+        if (cdsMatching) fprintf(tfiles[fi],"\tcds_class_code");
+        fprintf(tfiles[fi],"\n");
         if (haveRefs) {
           s=sbase;
           s.append(".refmap");
@@ -1241,18 +1243,21 @@ void printXLoci(FILE* f, FILE* fc, int qcount, GList<GXLocus>& xloci, /* GFaSeqG
 		xloc.checkContainment(keepAltTSS, allowIntronSticking);
 		tssCluster(xloc);//cluster and assign tss_id and cds_id to each xconsensus in xloc
 		//protCluster(xloc,faseq);
-		for (int c=0;c<xloc.tcons.Count();c++) {
-			if (discardContained && xloc.tcons[c]->contained!=NULL) {
-				if (!(keepRefMatching && xloc.tcons[c]->refcode=='='))
-				{
-					if (fr) printConsGTF(fr, xloc.tcons[c], xloc.id);
-					continue;
-				}
-			}
-			printConsGTF(fc,xloc.tcons[c],xloc.id);
-			++outConsCount;
-		}
-		fprintf(f,"XLOC_%06d\t%s[%c]%d-%d\t", xloc.id,
+    for (int c = 0; c < xloc.tcons.Count(); c++)
+    {
+      if (discardContained && xloc.tcons[c]->contained != NULL)
+      {
+        if (!(keepRefMatching && xloc.tcons[c]->refcode == '='))
+        {
+          if (fr)
+            printConsGTF(fr, xloc.tcons[c], xloc.id);
+          continue;
+        }
+      }
+      printConsGTF(fc, xloc.tcons[c], xloc.id);
+      ++outConsCount;
+    }
+    fprintf(f,"XLOC_%06d\t%s[%c]%d-%d\t", xloc.id,
 				xloc.qloci[0]->mrna_maxcov->getGSeqName(),
 				xloc.strand, xloc.start,xloc.end);
 		//now print all transcripts in this locus, comma delimited
@@ -1698,35 +1703,32 @@ GffObj *findRefMatch(GffObj &m, GLocus &rloc, int &ovlen)
   {
     int olen = 0;
     char eqcode = 0;
-    if ((eqcode = transcriptMatch(m, *(rloc.mrnas[r]), olen)) > 0)
-    {
+    if ((eqcode=transcriptMatch(m, *(rloc.mrnas[r]),olen))>0) {
       /*
       if (ovlen<olen) {
         ovlen=olen;
         ret=rloc.mrnas[r]; //keep the longest matching ref
-         //but this is unnecessary, there can be only one matching ref
-         // because duplicate refs were discarded
+        //but this is unnecessary, there can be only one matching ref
+        // because duplicate refs were discarded
         }
       */
-      eqcode = (eqcode == ':' && !cdsMatching) ? '=' : eqcode;
-      eqcode = (eqcode == '_' && !cdsMatching) ? '~' : eqcode;
-      // for class code output, '~' should be shown as '=' (and '_' as '-') unless strict matching was requested!
-      if (eqcode == '~' && !stricterMatching)
-      {
-        eqcode = '=';
-        olen--;
-      }
-      if (eqcode == '_' && !stricterMatching)
-      {
-        eqcode = ':';
-        olen--;
-      }
-
-      mdata->addOvl(eqcode, rloc.mrnas[r], olen);
+      //for class code output, '~' should be shown as '=' unless strict matching was requested!
+      if (eqcode=='~' && !stricterMatching) { eqcode='='; olen--; }
+      mdata->addOvl(eqcode,rloc.mrnas[r], olen);
       // this must be called only for the head of an equivalency chain
       CTData *rdata = (CTData *)rloc.mrnas[r]->uptr;
       rdata->addOvl(eqcode, &m, olen);
       // if (rdata->eqnext==NULL) rdata->eqnext=&m;
+
+      // check for CDS code
+      if (cdsMatching) {
+        char cds_code = getCdsCode(m, *(rloc.mrnas[r]));
+        COvLink* movl = mdata->getOvl(rloc.mrnas[r]);
+        if (movl != NULL) movl->setCdsCode(cds_code);
+
+        COvLink* rovl = rdata->getOvl(&m);
+        if (rovl != NULL) rovl->setCdsCode(cds_code);
+      }
     }
   }
   if (mdata->ovls.Count() > 0 && mdata->ovls.First()->code == '=')
@@ -1864,9 +1866,11 @@ void printITrack(FILE* ft, GList<GffObj>& mrnas, int qcount, int& cnum) {
 		if (ft==NULL) continue;
 		if (chainHead) {
 			//this is the start of an equivalence class as a printing chain
-			if (ref!=NULL) fprintf(ft,"%s|%s\t%c", getGeneID(ref),ref->getID(), ovlcode);
-			else fprintf(ft,"-\t%c", ovlcode);
-			GffObj* m=mrnas[i];
+      if (ref != NULL)
+        fprintf(ft, "%s|%s\t%c", getGeneID(ref), ref->getID(), ovlcode);
+      else
+        fprintf(ft, "-\t%c", ovlcode);
+      GffObj* m=mrnas[i];
 			CTData* mdata=(CTData*)m->uptr;
 
 			int lastpq=-1;
@@ -1906,9 +1910,11 @@ void printITrack(FILE* ft, GList<GffObj>& mrnas, int qcount, int& cnum) {
 
 		//--------- not in an ichain-matching class, print as singleton
 
-		if (ref!=NULL) fprintf(ft,"%s|%s\t%c",getGeneID(ref), ref->getID(), ovlcode);
-		else fprintf(ft,"-\t%c",ovlcode);
-		for (int ptab=qfidx;ptab>=0;ptab--)
+    if (ref != NULL)
+      fprintf(ft, "%s|%s\t%c", getGeneID(ref), ref->getID(), ovlcode); // tracking
+    else
+      fprintf(ft, "-\t%c", ovlcode); // tracking
+    for (int ptab=qfidx;ptab>=0;ptab--)
 			if (ptab>0) fprintf(ft,"\t-");
 			else fprintf(ft,"\t");
 		fprintf(ft,"q%d:%s|%s|%d|%8.6f|%8.6f|%8.6f|%d",qfidx+1, getGeneID(qt), qt.getID(),
@@ -1947,6 +1953,11 @@ void findTRMatch(GTrackLocus& loctrack, int qcount, GLocus& rloc) {
 					for (int k=0;k<qtdata->eqlist->Count();k++) {
 						GffObj* m=qtdata->eqlist->Get(k);
 						((CTData*)m->uptr)->addOvl('=',rmatch,rovlen);
+            if (cdsMatching) {
+              char cds_code = getCdsCode(*m, *rmatch);
+              COvLink* ovl = ((CTData*)m->uptr)->getOvl(rmatch);
+              if (ovl != NULL) ovl->setCdsCode(cds_code);
+            }
 						continue;
 					}
 				}
@@ -2146,6 +2157,7 @@ void umrnaReclass(int qcount,  GSeqTrack& gtrack, FILE** ftr, GFaSeqGet* faseq=N
             GffObj* ref=NULL;
             if (mdata->ovls.Count()>0) {
                 mdata->classcode=mdata->ovls[0]->code;
+                mdata->cds_classcode=mdata->ovls[0]->cds_code;
                 ref=mdata->ovls[0]->mrna;
             }
             //if (mdata->classcode<33) mdata->classcode='u';
@@ -2164,10 +2176,14 @@ void umrnaReclass(int qcount,  GSeqTrack& gtrack, FILE** ftr, GFaSeqGet* faseq=N
                 //fprintf(ftr[q],"%c\t%s\t%d\t%8.6f\t%8.6f\t%d\n", ovlcode, mdata->mrna->getID(),
                 //    iround(mdata->mrna->gscore/10), mdata->FPKM, mdata->cov, mdata->mrna->covlen);
                 const char* mlocname = (mdata->locus!=NULL) ? mdata->locus->mrna_maxcov->getID() : mdata->mrna->getID();
-                fprintf(ftr[q],"%c\t%s\t%s\t%d\t%8.6f\t%8.6f\t%8.6f\t%d\t%s\t%s\n", mdata->classcode, getGeneID(mdata->mrna), mdata->mrna->getID(),
-                        //iround(mdata->mrna->gscore/10),
-                		mdata->mrna->exons.Count(),
-						mdata->FPKM, mdata->TPM, mdata->cov, mdata->mrna->covlen, mlocname, ref_match_len);
+                fprintf(ftr[q], "%c\t%s\t%s\t%d\t%8.6f\t%8.6f\t%8.6f\t%d\t%s\t%s", mdata->classcode, getGeneID(mdata->mrna), mdata->mrna->getID(),
+                        // iround(mdata->mrna->gscore/10),
+                        mdata->mrna->exons.Count(),
+                        mdata->FPKM, mdata->TPM, mdata->cov, mdata->mrna->covlen, mlocname, ref_match_len);
+                if (cdsMatching) {
+                    fprintf(ftr[q], "\t%c", mdata->cds_classcode);
+                }
+                fprintf(ftr[q], "\n");
             }
         } //for each tdata
     } //for each qdata
@@ -2433,14 +2449,18 @@ void xclusterLoci(int qcount, char strand, GSeqTrack& gtrack) {
    //the newly created xloci are in xloci
    umrnasXStrand(xloci, gtrack);
    //also merge these xloci into the global list of xloci
-   for (int l=0; l < xloci.Count(); l++) {
-       if (xloci[l]->strand=='+') {
-           gtrack.xloci_f.Add(xloci[l]);
-           }
-          else if (xloci[l]->strand=='-') {
-              gtrack.xloci_r.Add(xloci[l]);
-              }
-            else gtrack.xloci_u.Add(xloci[l]);
+   for (int l = 0; l < xloci.Count(); l++)
+   {
+     if (xloci[l]->strand == '+')
+     {
+       gtrack.xloci_f.Add(xloci[l]);
+     }
+     else if (xloci[l]->strand == '-')
+     {
+       gtrack.xloci_r.Add(xloci[l]);
+     }
+     else
+       gtrack.xloci_u.Add(xloci[l]);
    }
  }//for each xcluster
 }
@@ -2565,5 +2585,4 @@ void trackGData(int qcount, GList<GSeqTrack>& gtracks, GStr& fbasename, FILE** f
   if (f_itrack!=NULL) fclose(f_itrack);
   if (f_ctrack!=NULL) fclose(f_ctrack);
   if (f_xloci!=NULL) fclose(f_xloci);
-
 }
